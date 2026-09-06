@@ -1,0 +1,23 @@
+# build
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.out
+*.exe
+
+# debug
+core
+core.*
+vgcore.*
+*.log
+
+# editors / os
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
