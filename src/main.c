@@ -9,9 +9,8 @@
 #include "proto.h"
 #include "net.h"
 #include "peers.h"
+#include "cluster.h"
 
-static int sock;
-static int my_port;
 static int running = 1;
 
 static void usage(void)
@@ -28,38 +27,6 @@ static void help(void)
            "  peers                 кто в кластере\n"
            "  send <порт> <текст>   отправить текст узлу\n"
            "  quit                  выйти\n");
-}
-
-// собрать сообщение и отправить
-static void send_msg(int type, uint32_t ip, uint16_t port, const char *text)
-{
-    struct msg m;
-    memset(&m, 0, sizeof m);
-    m.type = type;
-    m.port = my_port;
-    snprintf(m.text, sizeof m.text, "%s", text);
-    net_send(sock, ip, port, &m);
-}
-
-// пришло сообщение
-static void on_message(struct msg *m, uint32_t ip, uint16_t port)
-{
-    peers_seen(ip, port);
-
-    switch (m->type) {
-    case MSG_HELLO:
-        printf("узел %d вошёл\n", port);
-        send_msg(MSG_WELCOME, ip, port, "");
-        break;
-    case MSG_WELCOME:
-        printf("узел %d нас принял\n", port);
-        break;
-    case MSG_DATA:
-        printf("[%d] %s\n", port, m->text);
-        break;
-    default:
-        printf("от %d непонятное сообщение, type=%d\n", port, m->type);
-    }
 }
 
 // набрали строку в консоли
@@ -85,7 +52,7 @@ static void on_command(char *line)
             printf("не знаю узел %d, смотри peers\n", port);
             return;
         }
-        send_msg(MSG_DATA, peers[i].ip, peers[i].port, text);
+        cluster_send(MSG_DATA, peers[i].ip, peers[i].port, text);
 
     } else if (strcmp(line, "quit") == 0) {
         running = 0;
@@ -100,6 +67,7 @@ static void on_command(char *line)
 
 int main(int argc, char **argv)
 {
+    int      my_port   = 0;
     uint32_t join_ip   = 0;
     uint16_t join_port = 0;
     int      have_join = 0;
@@ -129,17 +97,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    sock = net_open(my_port);
+    int sock = net_open(my_port);
     if (sock < 0)
         return 1;
     printf("узел %d запущен\n", my_port);
     help();
 
-    // здороваемся
-    if (have_join) {
-        peers_add(join_ip, join_port);
-        send_msg(MSG_HELLO, join_ip, join_port, "");
-    }
+    cluster_init(sock, my_port);
+    if (have_join)
+        cluster_join(join_ip, join_port);
 
     // главный цикл: ждём сразу и сеть, и клавиатуру
     struct pollfd fds[2] = {
@@ -158,7 +124,7 @@ int main(int argc, char **argv)
             uint32_t   ip;
             uint16_t   port;
             if (net_recv(sock, &m, &ip, &port) == 0)
-                on_message(&m, ip, port);
+                cluster_handle(&m, ip, port);
         }
 
         if (fds[1].revents & POLLIN) {      // набрали строку
